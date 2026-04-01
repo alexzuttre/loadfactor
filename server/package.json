@@ -1,0 +1,14 @@
+{
+  "name": "loadfactor-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@google-cloud/spanner": "^7.14.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0"
+  }
+}
