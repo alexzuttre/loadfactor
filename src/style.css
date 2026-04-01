@@ -192,10 +192,24 @@ body {
   gap: 16px;
 }
 
+.header-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.header-subtitle {
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+}
+
 .header-right {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .theme-toggle {
@@ -216,6 +230,96 @@ body {
 .theme-toggle:hover {
   background: var(--accent);
   border-color: var(--muted-foreground);
+}
+
+.user-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 6px);
+}
+
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.user-name {
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.user-email {
+  font-size: 0.74rem;
+  color: var(--muted-foreground);
+  line-height: 1.2;
+}
+
+.user-status {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.user-status.allowed {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--lf-green);
+  border: 1px solid rgba(34, 197, 94, 0.24);
+}
+
+.user-status.denied {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--destructive);
+  border: 1px solid rgba(239, 68, 68, 0.24);
+}
+
+.user-status.pending {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--primary);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.logout-btn,
+.secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.logout-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.logout-btn:hover,
+.secondary-btn:hover {
+  border-color: var(--muted-foreground);
+  background: var(--accent);
+}
+
+.secondary-btn {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  color: var(--foreground);
 }
 
 .header-icon {
@@ -817,6 +921,44 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Summary Bar ────────────────────────────────────────────────────────── */
+/* ── Table Toolbar ──────────────────────────────────────────────────────── */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.table-group-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.group-ctrl-btn {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.group-ctrl-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.group-ctrl-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .summary-bar {
   display: flex;
   gap: 12px;
@@ -1052,6 +1194,9 @@ body {
 .state-subtitle { font-size: 0.88rem; color: var(--muted-foreground); max-width: 400px; line-height: 1.5; }
 .state-container.error .state-title { color: var(--destructive); }
 .state-container.loading .state-icon { animation: bounce 1.2s ease-in-out infinite; }
+.state-container.auth-denied { gap: 10px; }
+.state-detail { max-width: 560px; color: var(--muted-foreground); font-size: 0.92rem; }
+.state-actions { display: flex; gap: 12px; margin-top: 12px; }
 @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
 
 /* ── Animations ─────────────────────────────────────────────────────────── */
@@ -1167,6 +1312,8 @@ body {
 @media (max-width: 768px) {
   #app { padding: 0 12px; }
   .header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .header-right { width: 100%; justify-content: flex-start; }
+  .user-panel { width: 100%; align-items: flex-start; flex-wrap: wrap; }
   .search-row { flex-direction: column; }
   .form-group { min-width: 100%; }
   .date-range-wrapper { min-width: 100%; }
