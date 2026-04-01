@@ -322,7 +322,7 @@ function renderTable() {
     {key:'sold',label:'Sold',num:1},{key:'held',label:'Held',num:1},{key:'available',label:'Available',num:1},
     {key:'sold_lf',label:'Sold LF',tip:`${SOLD_LF_TOOLTIP} - How full the flight is based on confirmed sales only`},
     {key:'managed_lf',label:'Managed LF',tip:`${MANAGED_LF_TOOLTIP} - Includes held (unconfirmed) bookings in the load`},
-    {key:'sellable_update_source',label:'Source'},{key:'quota_last_updated_at',label:'Last Updated'},
+    {key:'sellable_update_source',label:'SC Source',tip:'Source of the latest Sellable Capacity'},{key:'quota_last_updated_at',label:'SC Updated',tip:'Time when the Sellable Capacity was last updated'},
   ];
   const th = cols.map(c => {
     const s = state.sortKey===c.key;
