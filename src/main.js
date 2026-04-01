@@ -29,13 +29,27 @@ let state = {
   selectedEnv: 'rx-prd',
   environments: [],
   expandedGroups: new Set(),
+  theme: localStorage.getItem('lf-theme') || 'dark',
 };
 let tooltipEl = null;
 let activeTooltipTarget = null;
 let activeSearchSeq = 0;
 
 // ── Boot ───────────────────────────────────────────────────────────────────
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', state.theme);
+  localStorage.setItem('lf-theme', state.theme);
+}
+function toggleTheme() {
+  const inputs = getSearchInputs();
+  state.theme = state.theme === 'dark' ? 'light' : 'dark';
+  applyTheme();
+  render();
+  restoreSearchInputs(inputs);
+}
+
 async function boot() {
+  applyTheme();
   render(); setupGlobal();
   try {
     const res = await fetch('/api/environments');
@@ -95,7 +109,8 @@ function renderHeader() {
   const options = envList.map(e =>
     `<option value="${e.name}" ${e.name === state.selectedEnv ? 'selected' : ''}>${e.name}</option>`
   ).join('');
-  return `<header class="header"><div class="header-left"><div class="header-icon">📊</div><h1>LoadFactor Dashboard</h1></div><div class="${badgeClass}"><select id="env-select" class="env-select">${options}</select></div></header>`;
+  const themeIcon = state.theme === 'dark' ? '☀️' : '🌙';
+  return `<header class="header"><div class="header-left"><div class="header-icon">📊</div><h1>LoadFactor Dashboard</h1></div><div class="header-right"><button type="button" class="theme-toggle" id="theme-toggle" title="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">${themeIcon}</button><div class="${badgeClass}"><select id="env-select" class="env-select">${options}</select></div></div></header>`;
 }
 
 function renderSearchPanel() {
@@ -343,7 +358,7 @@ function renderTable() {
       <td>${cabinCol}</td>
       <td class="col-num">${fmtN(r.physical_capacity)}</td><td class="col-num">${fmtN(r.lidded_capacity)}</td><td class="col-num">${fmtN(r.sellable_capacity)}</td>
       <td class="col-num">${fmtN(r.sold)}</td><td class="col-num">${fmtN(r.held)}</td>
-      <td class="col-num" style="color:${r.available!=null&&r.available<0?'var(--lf-red)':'var(--text-primary)'}">${fmtN(r.available)}</td>
+      <td class="col-num" style="color:${r.available!=null&&r.available<0?'var(--lf-red)':'var(--foreground)'}">${fmtN(r.available)}</td>
       <td>${lfBar(sLF)}</td><td>${lfBar(mLF)}</td>
       <td>${srcBadge(r.sellable_update_source)}</td><td class="ts-cell">${fmtTS(r.quota_last_updated_at)}</td>
     </tr>`;
@@ -354,7 +369,7 @@ function renderTable() {
 
 function cabinBadge(n,c) { const s=c===2?'business':c===4?'premium-economy':c===5?'economy':'other'; return `<span class="cabin-badge ${s}">${n}</span>`; }
 function lfBar(p) {
-  if (p==null) return '<span class="col-num" style="color:var(--text-muted)">—</span>';
+  if (p==null) return '<span class="col-num" style="color:var(--muted-foreground)">—</span>';
   const w=Math.min(p,100), c=lfColor(p);
   return `<div class="lf-cell"><div class="lf-bar-track"><div class="lf-bar-fill ${c}" style="width:${w}%"></div></div><span class="lf-value ${c}">${p.toFixed(1)}%</span></div>`;
 }
@@ -396,6 +411,8 @@ function bindEvents() {
     sp.addEventListener('mouseover', onPanelHover);
     sp.addEventListener('mouseout', onPanelOut);
   }
+  const themeToggle = document.getElementById('theme-toggle');
+  if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
   const envSelect = document.getElementById('env-select');
   if (envSelect) envSelect.addEventListener('change', e => {
     const searchInputs = getSearchInputs();
