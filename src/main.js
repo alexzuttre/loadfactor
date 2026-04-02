@@ -295,7 +295,7 @@ function renderHeader() {
         <div class="header-icon">📊</div>
         <div class="header-title-wrap">
           <h1>LoadFactor Dashboard</h1>
-          <div class="header-subtitle">Cloud Run hosted, Okta-gated, allowlist enforced</div>
+          <div class="header-subtitle"></div>
         </div>
       </div>
       <div class="header-right">
@@ -463,8 +463,9 @@ function renderDashboard() {
   };
 
   // Alerts
-  const renderAlertGroup = (title, items, type) => {
-    if (!items.length) return `<div class="alert-group"><div class="alert-group-title">${title}</div><div class="alert-empty">None</div></div>`;
+  const renderAlertGroup = (title, items, type, tip) => {
+    const tipIcon = tip ? ` <span class="info-icon" ${tooltipAttrs(tip)}>ⓘ</span>` : '';
+    if (!items.length) return `<div class="alert-group"><div class="alert-group-title">${title}${tipIcon}</div><div class="alert-empty">None</div></div>`;
     const rows = items.map(a => {
       const val = type === 'overbooking'
         ? `${a.soldHeld}/${a.sellable}`
@@ -476,7 +477,7 @@ function renderDashboard() {
         <span class="alert-val">${val}</span>
       </div>`;
     }).join('');
-    return `<div class="alert-group"><div class="alert-group-title">${title}</div>${rows}</div>`;
+    return `<div class="alert-group"><div class="alert-group-title">${title}${tipIcon}</div>${rows}</div>`;
   };
 
   // Stats row
@@ -504,19 +505,19 @@ function renderDashboard() {
 
       <div class="route-panels">
         <div class="dashboard-section">
-          <div class="dashboard-section-title">Highest LF Routes</div>
+          <div class="dashboard-section-title">Highest LF Routes <span class="info-icon" ${tooltipAttrs('Routes ranked by load factor (sold ÷ lidded capacity) across all cabins, aggregated over the last 3 days')}>ⓘ</span></div>
           <div class="route-list">${renderRouteList(d.topRoutes, 'No route data')}</div>
         </div>
         <div class="dashboard-section">
-          <div class="dashboard-section-title">Lowest LF Routes</div>
+          <div class="dashboard-section-title">Lowest LF Routes <span class="info-icon" ${tooltipAttrs('Routes ranked by load factor (sold ÷ lidded capacity) across all cabins, aggregated over the last 3 days')}>ⓘ</span></div>
           <div class="route-list">${renderRouteList(d.bottomRoutes, 'No route data')}</div>
         </div>
       </div>
 
       <div class="alert-section">
-        ${renderAlertGroup('High LF (>95%)', d.alerts.highLF, 'high-lf')}
-        ${renderAlertGroup('Low LF (<40%)', d.alerts.lowLF, 'low-lf')}
-        ${renderAlertGroup('Overbooking', d.alerts.overbooking, 'overbooking')}
+        ${renderAlertGroup('High LF (>95%)', d.alerts.highLF, 'high-lf', 'Individual cabin-flights where sold ÷ lidded capacity exceeds 95%, over the last 3 days')}
+        ${renderAlertGroup('Low LF (<40%)', d.alerts.lowLF, 'low-lf', 'Individual cabin-flights where sold ÷ lidded capacity is below 40%, over the last 3 days')}
+        ${renderAlertGroup('Overbooking', d.alerts.overbooking, 'overbooking', 'Cabin-flights where sold + held exceeds sellable capacity, over the last 3 days')}
       </div>
     </div>
   `;
