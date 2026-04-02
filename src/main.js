@@ -39,6 +39,9 @@ let state = {
   environments: [],
   expandedGroups: new Set(),
   theme: localStorage.getItem('lf-theme') || 'dark',
+  dashboardLoading: false,
+  dashboardData: null,
+  dashboardError: null,
 };
 let tooltipEl = null;
 let activeTooltipTarget = null;
@@ -69,6 +72,23 @@ function toggleTheme() {
   restoreSearchInputs(inputs);
 }
 
+async function loadDashboard(env) {
+  state.dashboardLoading = true;
+  state.dashboardError = null;
+  if (!state.data && !state.loading) render();
+  try {
+    const data = await fetchJsonOrThrow(`/api/dashboard?env=${encodeURIComponent(env)}`);
+    state.dashboardData = data;
+    state.dashboardError = null;
+  } catch (error) {
+    if (!isAuthRedirectError(error)) {
+      state.dashboardError = error.message;
+    }
+  }
+  state.dashboardLoading = false;
+  if (!state.data && !state.loading) render();
+}
+
 async function boot() {
   applyTheme();
   render();
@@ -93,7 +113,10 @@ async function boot() {
   }
 
   render();
-  if (state.authorized) prewarmSeatMaps(state.selectedEnv);
+  if (state.authorized) {
+    prewarmSeatMaps(state.selectedEnv);
+    loadDashboard(state.selectedEnv);
+  }
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
@@ -378,9 +401,130 @@ function renderContent() {
   if (!state.authorized) return renderAccessDenied();
   if (state.loading) return renderState('loading', '✈️', 'Querying Stock Keeper…', `Fetching live load factor data from ${state.selectedEnv} Spanner`);
   if (state.error) return renderState('error', '⚠️', 'Query Failed', state.error);
-  if (!state.data) return renderState('idle', '🛫', 'Ready to Search', 'Select a date range and optionally filter by origin and destination, then hit Search.');
+  if (!state.data) return renderDashboard();
   if (state.data.results.length === 0) return renderState('empty', '📭', 'No Flights Found', `No CAPACITY trackers matched for ${state.data.origin} → ${state.data.destination}, ${state.data.dateFrom} to ${state.data.dateTo}.`);
   return renderSummary() + renderTable();
+}
+
+function renderDashboard() {
+  if (state.dashboardLoading && !state.dashboardData) {
+    return `<div class="dashboard-loading"><div class="spinner"></div><span>Loading dashboard...</span></div>`;
+  }
+  if (state.dashboardError && !state.dashboardData) {
+    return `<div class="dashboard-error">
+      <span>Failed to load dashboard: ${escapeHtml(state.dashboardError)}</span>
+      <button type="button" class="group-ctrl-btn" id="dashboard-retry-btn">Retry</button>
+    </div>`;
+  }
+  const d = state.dashboardData;
+  if (!d) return renderState('idle', '🛫', 'Ready to Search', 'Select a date range and optionally filter by origin and destination, then hit Search.');
+
+  const cabinOrder = ['J', 'W', 'Y'];
+  const cabinLabel = { J: 'Business', W: 'Prem Econ', Y: 'Economy' };
+  const cabinClass = { J: 'business', W: 'premium-economy', Y: 'economy' };
+
+  // Daily LF cards
+  const dailyCards = d.dailyLoadFactor.map(day => {
+    const dateLabel = day.isToday ? 'Today' : fmtDashDate(day.date);
+    const overallLf = day.overall.lf;
+    const cabinLines = cabinOrder
+      .filter(c => day.cabins[c])
+      .map(c => {
+        const cb = day.cabins[c];
+        const lfVal = cb.lf != null ? `${cb.lf.toFixed(1)}%` : '—';
+        const color = cb.lf != null ? lfColor(cb.lf) : '';
+        return `<div class="daily-lf-cabin">
+          <span class="cabin-badge ${cabinClass[c]}">${cabinLabel[c]}</span>
+          <span class="daily-lf-cabin-val ${color}">${lfVal}</span>
+        </div>`;
+      }).join('');
+
+    return `<div class="daily-lf-card">
+      <div class="daily-lf-date">${dateLabel}</div>
+      <div class="daily-lf-overall">
+        <span class="daily-lf-pct ${overallLf != null ? lfColor(overallLf) : ''}">${overallLf != null ? overallLf.toFixed(1) + '%' : '—'}</span>
+        ${overallLf != null ? `<div class="lf-bar-track"><div class="lf-bar-fill ${lfColor(overallLf)}" style="width:${Math.min(overallLf, 100)}%"></div></div>` : ''}
+      </div>
+      <div class="daily-lf-cabins">${cabinLines}</div>
+      <div class="daily-lf-meta">${day.overall.sold.toLocaleString()} sold / ${day.overall.lidded.toLocaleString()} seats</div>
+    </div>`;
+  }).join('');
+
+  // Route lists
+  const renderRouteList = (routes, emptyMsg) => {
+    if (!routes.length) return `<div class="route-empty">${emptyMsg}</div>`;
+    return routes.map(r => `
+      <div class="route-item" data-origin="${escapeAttr(r.origin)}" data-destination="${escapeAttr(r.destination)}">
+        <span class="route-item-pair">${r.origin} → ${r.destination}</span>
+        <span class="route-item-lf ${lfColor(r.lf)}">${r.lf.toFixed(1)}%</span>
+        <span class="route-item-flights">${r.flights} flights</span>
+      </div>
+    `).join('');
+  };
+
+  // Alerts
+  const renderAlertGroup = (title, items, type) => {
+    if (!items.length) return `<div class="alert-group"><div class="alert-group-title">${title}</div><div class="alert-empty">None</div></div>`;
+    const rows = items.map(a => {
+      const val = type === 'overbooking'
+        ? `${a.soldHeld}/${a.sellable}`
+        : `${a.lf.toFixed(1)}%`;
+      return `<div class="alert-item ${type}">
+        <span class="alert-flight">${a.flight}</span>
+        <span class="alert-cabin cabin-badge ${cabinClass[a.cabin] || 'other'}">${a.cabin}</span>
+        <span class="alert-route">${a.route}</span>
+        <span class="alert-val">${val}</span>
+      </div>`;
+    }).join('');
+    return `<div class="alert-group"><div class="alert-group-title">${title}</div>${rows}</div>`;
+  };
+
+  // Stats row
+  const totalSold = d.dailyLoadFactor.reduce((s, day) => s + day.overall.sold, 0);
+  const totalLidded = d.dailyLoadFactor.reduce((s, day) => s + day.overall.lidded, 0);
+  const overallLf = totalLidded > 0 ? (totalSold / totalLidded) * 100 : null;
+
+  return `
+    <div class="dashboard">
+      <div class="dashboard-header">
+        <div class="dashboard-title">Network Overview <span class="dashboard-period">${d.dateRange.from} → ${d.dateRange.to}</span></div>
+        <button type="button" class="group-ctrl-btn" id="dashboard-refresh-btn"${state.dashboardLoading ? ' disabled' : ''}>${state.dashboardLoading ? 'Refreshing...' : 'Refresh'}</button>
+      </div>
+
+      <div class="dashboard-stats">
+        <div class="summary-stat"><span class="stat-label">Total Flights</span><span class="stat-value">${d.totalFlights.toLocaleString()}</span></div>
+        <div class="summary-stat"><span class="stat-label">Overall LF (3d)</span><span class="stat-value ${overallLf != null ? lfColor(overallLf) : ''}">${overallLf != null ? overallLf.toFixed(1) + '%' : '—'}</span></div>
+        <div class="summary-stat"><span class="stat-label">Environment</span><span class="stat-value">${state.selectedEnv}</span></div>
+      </div>
+
+      <div class="dashboard-section">
+        <div class="dashboard-section-title">Daily Load Factor</div>
+        <div class="daily-lf-grid">${dailyCards}</div>
+      </div>
+
+      <div class="route-panels">
+        <div class="dashboard-section">
+          <div class="dashboard-section-title">Highest LF Routes</div>
+          <div class="route-list">${renderRouteList(d.topRoutes, 'No route data')}</div>
+        </div>
+        <div class="dashboard-section">
+          <div class="dashboard-section-title">Lowest LF Routes</div>
+          <div class="route-list">${renderRouteList(d.bottomRoutes, 'No route data')}</div>
+        </div>
+      </div>
+
+      <div class="alert-section">
+        ${renderAlertGroup('High LF (>95%)', d.alerts.highLF, 'high-lf')}
+        ${renderAlertGroup('Low LF (<40%)', d.alerts.lowLF, 'low-lf')}
+        ${renderAlertGroup('Overbooking', d.alerts.overbooking, 'overbooking')}
+      </div>
+    </div>
+  `;
+}
+
+function fmtDashDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function renderAccessDenied() {
@@ -651,12 +795,25 @@ function bindEvents() {
     render();
     prewarmSeatMaps(state.selectedEnv);
     if (shouldRepeatSearch) handleSearch(inputs);
-    else restoreSearchInputs(inputs);
+    else { restoreSearchInputs(inputs); loadDashboard(state.selectedEnv); }
   });
   const logoutButton = document.getElementById('logout-btn');
   if (logoutButton) logoutButton.addEventListener('click', handleLogout);
   const inlineLogoutButton = document.getElementById('logout-btn-inline');
   if (inlineLogoutButton) inlineLogoutButton.addEventListener('click', handleLogout);
+  // Dashboard events
+  const dashRefresh = document.getElementById('dashboard-refresh-btn');
+  if (dashRefresh) dashRefresh.addEventListener('click', () => loadDashboard(state.selectedEnv));
+  const dashRetry = document.getElementById('dashboard-retry-btn');
+  if (dashRetry) dashRetry.addEventListener('click', () => loadDashboard(state.selectedEnv));
+  document.querySelectorAll('.route-item[data-origin]').forEach(el => {
+    el.addEventListener('click', () => {
+      const originInput = document.getElementById('origin');
+      const destInput = document.getElementById('destination');
+      if (originInput) originInput.value = el.dataset.origin;
+      if (destInput) destInput.value = el.dataset.destination;
+    });
+  });
   document.querySelectorAll('.iata-input').forEach((input) => input.addEventListener('input', (event) => { event.target.value = event.target.value.toUpperCase().replace(/[^A-Z]/g, ''); }));
   document.querySelectorAll('.flight-filter-input').forEach((input) => input.addEventListener('input', (event) => { event.target.value = event.target.value.replace(/[^\d,\-\s]/g, ''); }));
   document.querySelectorAll('.data-table th[data-sort]').forEach((th) => th.addEventListener('click', () => handleSort(th.dataset.sort)));

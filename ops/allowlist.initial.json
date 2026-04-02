@@ -1,0 +1,42 @@
+[
+  {
+    "email": "vamsi.kodam@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  },
+  {
+    "email": "sebastien.monteil@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  },
+  {
+    "email": "emmanuel.heitmanntaillefer@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  },
+  {
+    "email": "bartosz.biernacki@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  },
+  {
+    "email": "monika.adamus_zajac@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  },
+  {
+    "email": "magdalena.ksiazek@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  },
+  {
+    "email": "lukasz.koziel@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  },
+  {
+    "email": "patryk.stryczek@flyr.com",
+    "role": "viewer",
+    "status": "active"
+  }
+]

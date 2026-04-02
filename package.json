@@ -6,10 +6,22 @@
   "scripts": {
     "dev": "concurrently --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
-    "dev:server": "node server/server.js"
+    "dev:server": "node server/server.js",
+    "build": "vite build",
+    "start": "node server/server.js",
+    "test": "node --test server/**/*.test.js",
+    "seed:allowlist": "node scripts/seed_allowlist.js",
+    "preflight:auth": "./scripts/oauth_preflight.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
     "vite": "^6.2.0"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^8.3.0",
+    "@google-cloud/spanner": "^8.6.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "jose": "^6.2.2"
   }
 }
