@@ -629,19 +629,34 @@ export function registerLoadFactorRoutes(router) {
 
   router.get('/api/dashboard', async (req, res) => {
     const env = req.query.env || 'rx-prd';
+    const period = req.query.period || 'last3';
     if (!ENVIRONMENTS[env]) {
       return res.status(400).json({ error: `Unknown environment: ${env}` });
     }
+    if (!['last3', 'next7', 'next30'].includes(period)) {
+      return res.status(400).json({ error: `Unknown period: ${period}` });
+    }
 
-    // Check cache
-    const cached = dashboardCache.get(env);
+    // Check cache (keyed by env + period)
+    const cacheKey = `${env}:${period}`;
+    const cached = dashboardCache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt) {
       return res.json({ ...cached.data, cached: true });
     }
 
     const now = new Date();
-    const dateTo = now.toISOString().slice(0, 10);
-    const dateFrom = new Date(now.getTime() - 2 * 86400000).toISOString().slice(0, 10);
+    const today = now.toISOString().slice(0, 10);
+    let dateFrom, dateTo;
+    if (period === 'last3') {
+      dateTo = today;
+      dateFrom = new Date(now.getTime() - 2 * 86400000).toISOString().slice(0, 10);
+    } else if (period === 'next7') {
+      dateFrom = today;
+      dateTo = new Date(now.getTime() + 6 * 86400000).toISOString().slice(0, 10);
+    } else {
+      dateFrom = today;
+      dateTo = new Date(now.getTime() + 29 * 86400000).toISOString().slice(0, 10);
+    }
 
     const sql = `
 SELECT
@@ -755,7 +770,7 @@ WHERE tr.quota_type = 'CAPACITY'
         }
         return {
           date,
-          isToday: date === dateTo,
+          isToday: date === today,
           overall: { sold: totalSold, lidded: totalLidded, lf: totalLidded > 0 ? Math.round((totalSold / totalLidded) * 1000) / 10 : null },
           cabins: byCabin,
         };
@@ -790,6 +805,7 @@ WHERE tr.quota_type = 'CAPACITY'
       };
 
       const result = {
+        period,
         dateRange: { from: dateFrom, to: dateTo },
         dailyLoadFactor,
         topRoutes,
@@ -801,7 +817,7 @@ WHERE tr.quota_type = 'CAPACITY'
         queryMs,
       };
 
-      dashboardCache.set(env, { data: result, expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS });
+      dashboardCache.set(cacheKey, { data: result, expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS });
       res.json(result);
     } catch (error) {
       auditError('dashboard_query_failed', error, { env });

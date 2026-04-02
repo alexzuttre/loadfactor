@@ -1191,8 +1191,61 @@ body {
 .dashboard {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 8px;
   animation: fadeInUp 0.4s var(--ease-out);
+}
+
+/* Drawer */
+.dash-drawer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.dash-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.dash-drawer-header:hover { background: var(--accent); }
+.dash-drawer-header.open { background: var(--accent); border-bottom: 1px solid var(--border); }
+
+.dash-drawer-chevron {
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+  width: 14px;
+  text-align: center;
+}
+
+.dash-drawer-label {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--foreground);
+}
+
+.dash-drawer-desc {
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+}
+
+.dash-drawer-preview {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  color: var(--muted-foreground);
+}
+
+.dash-drawer-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: fadeInUp 0.25s var(--ease-out);
 }
 
 .dashboard-header {
@@ -1202,9 +1255,10 @@ body {
 }
 
 .dashboard-title {
-  font-size: 1.1rem;
+  font-size: 1.0rem;
   font-weight: 600;
   color: var(--foreground);
+  font-family: var(--font-mono);
 }
 
 .dashboard-period {
@@ -1411,6 +1465,13 @@ body {
 .alert-route {
   color: var(--muted-foreground);
   font-size: 0.72rem;
+}
+
+.alert-date {
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .alert-val {
