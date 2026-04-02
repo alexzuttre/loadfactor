@@ -1076,6 +1076,16 @@ body {
 }
 .al-role-select:focus { border-color: var(--primary); }
 
+/* Compact inline role select inside each user row */
+.al-role-select--inline {
+  height: 26px;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 20px;
+}
+.al-role-select--inline:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .al-add-btn {
   height: 34px;
   padding: 0 16px;

@@ -644,10 +644,10 @@ function closeAllowlist() {
   if (modal) modal.remove();
 }
 
-async function fetchAllowlist() {
-  state.allowlistLoading = true;
+async function fetchAllowlist(silent = false) {
+  if (!silent) state.allowlistLoading = true;
   state.allowlistError = null;
-  updateAllowlistBody();
+  if (!silent) updateAllowlistBody();
   try {
     const res = await fetchJsonOrThrow('/api/access-users');
     state.allowlistUsers = res.users || [];
@@ -655,6 +655,7 @@ async function fetchAllowlist() {
     if (!isAuthRedirectError(err)) state.allowlistError = err.message;
   }
   state.allowlistLoading = false;
+  state.allowlistSaving = null;
   updateAllowlistBody();
 }
 
@@ -667,7 +668,7 @@ async function allowlistUpsert(email, role, status) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, role, status }),
     });
-    await fetchAllowlist();
+    await fetchAllowlist(true);
   } catch (err) {
     if (!isAuthRedirectError(err)) {
       alert(`Error: ${err.message}`);
@@ -683,7 +684,7 @@ async function allowlistDelete(email) {
   updateAllowlistBody();
   try {
     await fetchJsonOrThrow(`/api/access-users/${encodeURIComponent(email)}`, { method: 'DELETE' });
-    await fetchAllowlist();
+    await fetchAllowlist(true);
   } catch (err) {
     if (!isAuthRedirectError(err)) {
       alert(`Error: ${err.message}`);
@@ -694,10 +695,10 @@ async function allowlistDelete(email) {
 }
 
 function renderAllowlistBody() {
-  if (state.allowlistLoading) {
+  if (state.allowlistLoading && !state.allowlistUsers) {
     return `<div class="al-loading"><div class="spinner"></div><span>Loading users…</span></div>`;
   }
-  if (state.allowlistError) {
+  if (state.allowlistError && !state.allowlistUsers) {
     return `<div class="al-error">${escapeHtml(state.allowlistError)}
       <button type="button" class="group-ctrl-btn" id="al-retry-btn">Retry</button></div>`;
   }
@@ -705,7 +706,6 @@ function renderAllowlistBody() {
   const rows = users.map(u => {
     const isImmutable = u.email === IMMUTABLE_ADMIN;
     const isSaving = state.allowlistSaving === u.email;
-    const isAdmin = u.role === 'admin';
     const isActive = u.status === 'active';
     const disableAll = isSaving || isImmutable;
 
@@ -722,13 +722,12 @@ function renderAllowlistBody() {
           title="${isActive ? 'Disable access' : 'Enable access'}">
           ${isActive ? 'Active' : 'Disabled'}
         </button>
-        <button type="button" class="al-chip${isAdmin ? ' admin' : ''}"
-          data-al-action="toggle-role" data-email="${escapeAttr(u.email)}"
-          data-role="${isAdmin ? 'viewer' : 'admin'}" data-status="${escapeAttr(u.status)}"
-          ${disableAll ? 'disabled' : ''}
-          title="${isAdmin ? 'Remove admin role' : 'Make admin'}">
-          ${isAdmin ? 'Admin' : 'Viewer'}
-        </button>
+        <select class="al-role-select al-role-select--inline"
+          data-al-action="set-role" data-email="${escapeAttr(u.email)}" data-status="${escapeAttr(u.status)}"
+          ${disableAll ? 'disabled' : ''}>
+          <option value="viewer"${u.role === 'viewer' ? ' selected' : ''}>Viewer</option>
+          <option value="admin"${u.role === 'admin' ? ' selected' : ''}>Admin</option>
+        </select>
         <button type="button" class="al-delete-btn"
           data-al-action="delete" data-email="${escapeAttr(u.email)}"
           ${disableAll ? 'disabled' : ''}
@@ -802,10 +801,13 @@ function bindAllowlistEvents(modal) {
 function bindAllowlistBodyEvents(body) {
   if (!body) return;
   body.querySelectorAll('[data-al-action]').forEach(el => {
-    el.addEventListener('click', () => {
-      const { alAction, email, role, status } = el.dataset;
-      if (alAction === 'delete') allowlistDelete(email);
-      else allowlistUpsert(email, role, status);
+    const eventType = el.tagName === 'SELECT' ? 'change' : 'click';
+    el.addEventListener(eventType, () => {
+      const { alAction, email, status } = el.dataset;
+      if (alAction === 'delete') { allowlistDelete(email); return; }
+      if (alAction === 'set-role') { allowlistUpsert(email, el.value, status); return; }
+      // toggle-status
+      allowlistUpsert(email, el.dataset.role, el.dataset.status);
     });
   });
   const retryBtn = body.querySelector('#al-retry-btn');
