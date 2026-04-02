@@ -1461,7 +1461,10 @@ body {
 
 .alert-cabin {
   font-size: 0.65rem;
-  padding: 1px 6px;
+  padding: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  justify-content: center;
   flex-shrink: 0;
   cursor: default;
 }
