@@ -1454,17 +1454,22 @@ body {
 .alert-flight {
   font-family: var(--font-mono);
   font-weight: 600;
+  min-width: 5.5rem;
+  flex-shrink: 0;
   min-width: 65px;
 }
 
 .alert-cabin {
   font-size: 0.65rem;
   padding: 1px 6px;
+  flex-shrink: 0;
+  cursor: default;
 }
 
 .alert-route {
   color: var(--muted-foreground);
   font-size: 0.72rem;
+  flex: 1;
 }
 
 .alert-date {
@@ -1472,6 +1477,8 @@ body {
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   white-space: nowrap;
+  min-width: 3.2rem;
+  flex-shrink: 0;
 }
 
 .alert-val {

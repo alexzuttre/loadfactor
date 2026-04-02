@@ -533,11 +533,13 @@ function renderDashboardContent(d, isRefreshing, periodInfo) {
         : type === 'overbooking-lidded'
         ? `${a.soldHeld}/${a.lidded}`
         : `${a.lf.toFixed(1)}%`;
-      const dateTag = a.date ? `<span class="alert-date">${fmtDashDate(a.date)}</span>` : '';
+      const CABIN_FULL = { J: 'Business', W: 'Premium Economy', Y: 'Economy' };
+      const dateTag = a.date ? `<span class="alert-date">${fmtIataDate(a.date)}</span>` : '<span class="alert-date"></span>';
+      const cabinTip = CABIN_FULL[a.cabin] ? tooltipAttrs(`${a.cabin} — ${CABIN_FULL[a.cabin]}`) : '';
       return `<div class="alert-item ${type}">
         <span class="alert-flight">${a.flight}</span>
         ${dateTag}
-        <span class="alert-cabin cabin-badge ${cabinClass[a.cabin] || 'other'}">${a.cabin}</span>
+        <span class="alert-cabin cabin-badge ${cabinClass[a.cabin] || 'other'}" ${cabinTip}>${a.cabin}</span>
         <span class="alert-route">${a.route}</span>
         <span class="alert-val">${val}</span>
       </div>`;
@@ -591,6 +593,12 @@ function renderDashboardContent(d, isRefreshing, periodInfo) {
 function fmtDashDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const IATA_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+function fmtIataDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getDate()}${IATA_MONTHS[d.getMonth()]}`;
 }
 
 function renderAccessDenied() {
