@@ -41,6 +41,11 @@ let state = {
   theme: localStorage.getItem('lf-theme') || 'dark',
   dashboardPeriod: 'last3',   // which drawer is open (null = all closed)
   dashboardPanels: {},         // { last3: { loading, data, error }, next7: ..., next30: ... }
+  allowlistOpen: false,
+  allowlistLoading: false,
+  allowlistUsers: null,
+  allowlistError: null,
+  allowlistSaving: null,       // email being saved/deleted
 };
 let tooltipEl = null;
 let activeTooltipTarget = null;
@@ -140,8 +145,9 @@ async function boot() {
 
   render();
   if (state.authorized) {
-    prewarmSeatMaps(state.selectedEnv);
-    loadDashboard(state.selectedEnv);
+    state.dashboardPanels = {};
+    state.dashboardPeriod = 'last3';
+    loadDashboard(state.selectedEnv, 'last3');
   }
 }
 
@@ -171,6 +177,14 @@ function redirectToLogin() {
     return;
   }
   window.location.assign(`/auth/login?returnTo=${encodeURIComponent(buildReturnTo())}`);
+}
+
+function isIapUser() {
+  return state.user?.authProvider === 'iap';
+}
+
+function authActionLabel() {
+  return 'Sign out';
 }
 
 async function requestJson(url, options = {}) {
@@ -269,14 +283,6 @@ function restoreSearchInputs({ origin = '', dest = '', flights = '' } = {}) {
   if (document.getElementById('flights')) document.getElementById('flights').value = flights;
 }
 
-function prewarmSeatMaps(env) {
-  fetch('/api/seatmaps/prewarm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ env }),
-  }).catch(() => {});
-}
-
 function render() {
   document.getElementById('app').innerHTML =
     renderHeader()
@@ -310,10 +316,19 @@ function renderHeader() {
           <div class="user-email">${escapeHtml(state.user.email)}</div>
         </div>
         ${authBadge}
-        <button type="button" class="logout-btn" id="logout-btn">Sign out</button>
+        <button type="button" class="logout-btn" id="logout-btn">${authActionLabel()}</button>
       </div>
     `
     : authBadge;
+  const onDashboard = !state.loading && !state.error && !state.data;
+  const homeButton = state.authorized
+    ? `<button type="button" class="home-btn" id="home-btn" title="${onDashboard ? 'Dashboard home' : 'Return to dashboard'}" ${onDashboard ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 11.5L12 5l8 6.5" />
+          <path d="M7 10.5V19h10v-8.5" />
+        </svg>
+      </button>`
+    : '';
 
   return `
     <header class="header">
@@ -325,6 +340,15 @@ function renderHeader() {
         </div>
       </div>
       <div class="header-right">
+        ${homeButton}
+        ${role === 'admin' ? `<button type="button" class="allowlist-btn" id="allowlist-btn" title="Manage allowlist">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </button>` : ''}
         <button type="button" class="theme-toggle" id="theme-toggle" title="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">${themeIcon}</button>
         ${state.authorized ? `<div class="${badgeClass}"><select id="env-select" class="env-select">${options}</select></div>` : ''}
         ${authControls}
@@ -601,6 +625,207 @@ function fmtIataDate(dateStr) {
   return `${d.getDate()}${IATA_MONTHS[d.getMonth()]}`;
 }
 
+// ── Allowlist modal ──────────────────────────────────────────────────────────
+
+const IMMUTABLE_ADMIN = 'alex.zuttre@flyr.com';
+
+async function openAllowlist() {
+  state.allowlistOpen = true;
+  state.allowlistUsers = null;
+  state.allowlistError = null;
+  state.allowlistSaving = null;
+  renderAllowlistModal();
+  await fetchAllowlist();
+}
+
+function closeAllowlist() {
+  state.allowlistOpen = false;
+  const modal = document.getElementById('allowlist-modal');
+  if (modal) modal.remove();
+}
+
+async function fetchAllowlist() {
+  state.allowlistLoading = true;
+  state.allowlistError = null;
+  updateAllowlistBody();
+  try {
+    const res = await fetchJsonOrThrow('/api/access-users');
+    state.allowlistUsers = res.users || [];
+  } catch (err) {
+    if (!isAuthRedirectError(err)) state.allowlistError = err.message;
+  }
+  state.allowlistLoading = false;
+  updateAllowlistBody();
+}
+
+async function allowlistUpsert(email, role, status) {
+  state.allowlistSaving = email;
+  updateAllowlistBody();
+  try {
+    await fetchJsonOrThrow('/api/access-users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, role, status }),
+    });
+    await fetchAllowlist();
+  } catch (err) {
+    if (!isAuthRedirectError(err)) {
+      alert(`Error: ${err.message}`);
+      state.allowlistSaving = null;
+      updateAllowlistBody();
+    }
+  }
+}
+
+async function allowlistDelete(email) {
+  if (!confirm(`Remove ${email} from the allowlist?`)) return;
+  state.allowlistSaving = email;
+  updateAllowlistBody();
+  try {
+    await fetchJsonOrThrow(`/api/access-users/${encodeURIComponent(email)}`, { method: 'DELETE' });
+    await fetchAllowlist();
+  } catch (err) {
+    if (!isAuthRedirectError(err)) {
+      alert(`Error: ${err.message}`);
+      state.allowlistSaving = null;
+      updateAllowlistBody();
+    }
+  }
+}
+
+function renderAllowlistBody() {
+  if (state.allowlistLoading) {
+    return `<div class="al-loading"><div class="spinner"></div><span>Loading users…</span></div>`;
+  }
+  if (state.allowlistError) {
+    return `<div class="al-error">${escapeHtml(state.allowlistError)}
+      <button type="button" class="group-ctrl-btn" id="al-retry-btn">Retry</button></div>`;
+  }
+  const users = state.allowlistUsers || [];
+  const rows = users.map(u => {
+    const isImmutable = u.email === IMMUTABLE_ADMIN;
+    const isSaving = state.allowlistSaving === u.email;
+    const isAdmin = u.role === 'admin';
+    const isActive = u.status === 'active';
+    const disableAll = isSaving || isImmutable;
+
+    return `<div class="al-row${isSaving ? ' al-row-saving' : ''}">
+      <div class="al-email">
+        ${escapeHtml(u.email)}
+        ${isImmutable ? '<span class="al-lock" title="Protected admin">🔒</span>' : ''}
+      </div>
+      <div class="al-controls">
+        <button type="button" class="al-chip${isActive ? ' active' : ''}"
+          data-al-action="toggle-status" data-email="${escapeAttr(u.email)}"
+          data-role="${escapeAttr(u.role)}" data-status="${isActive ? 'disabled' : 'active'}"
+          ${disableAll ? 'disabled' : ''}
+          title="${isActive ? 'Disable access' : 'Enable access'}">
+          ${isActive ? 'Active' : 'Disabled'}
+        </button>
+        <button type="button" class="al-chip${isAdmin ? ' admin' : ''}"
+          data-al-action="toggle-role" data-email="${escapeAttr(u.email)}"
+          data-role="${isAdmin ? 'viewer' : 'admin'}" data-status="${escapeAttr(u.status)}"
+          ${disableAll ? 'disabled' : ''}
+          title="${isAdmin ? 'Remove admin role' : 'Make admin'}">
+          ${isAdmin ? 'Admin' : 'Viewer'}
+        </button>
+        <button type="button" class="al-delete-btn"
+          data-al-action="delete" data-email="${escapeAttr(u.email)}"
+          ${disableAll ? 'disabled' : ''}
+          title="Remove from allowlist">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+            <path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="al-user-list">${rows || '<div class="al-empty">No users found.</div>'}</div>
+    <div class="al-add-form">
+      <div class="al-add-title">Add user</div>
+      <div class="al-add-row">
+        <input type="email" id="al-new-email" class="al-email-input" placeholder="user@flyr.com" autocomplete="off" spellcheck="false" />
+        <select id="al-new-role" class="al-role-select">
+          <option value="viewer">Viewer</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button type="button" class="al-add-btn" id="al-add-btn">Add</button>
+      </div>
+    </div>`;
+}
+
+function renderAllowlistModal() {
+  const existing = document.getElementById('allowlist-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'allowlist-modal';
+  modal.className = 'al-overlay';
+  modal.innerHTML = `
+    <div class="al-modal" role="dialog" aria-modal="true" aria-label="Manage allowlist">
+      <div class="al-header">
+        <div class="al-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="al-title-icon">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          Allowlist
+        </div>
+        <button type="button" class="al-close-btn" id="al-close-btn" aria-label="Close">✕</button>
+      </div>
+      <div class="al-body" id="al-body">${renderAllowlistBody()}</div>
+    </div>`;
+  document.body.appendChild(modal);
+  bindAllowlistEvents(modal);
+}
+
+function updateAllowlistBody() {
+  const body = document.getElementById('al-body');
+  if (!body) return;
+  body.innerHTML = renderAllowlistBody();
+  bindAllowlistBodyEvents(body);
+}
+
+function bindAllowlistEvents(modal) {
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeAllowlist();
+  });
+  const closeBtn = modal.querySelector('#al-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', closeAllowlist);
+  bindAllowlistBodyEvents(modal.querySelector('#al-body'));
+}
+
+function bindAllowlistBodyEvents(body) {
+  if (!body) return;
+  body.querySelectorAll('[data-al-action]').forEach(el => {
+    el.addEventListener('click', () => {
+      const { alAction, email, role, status } = el.dataset;
+      if (alAction === 'delete') allowlistDelete(email);
+      else allowlistUpsert(email, role, status);
+    });
+  });
+  const retryBtn = body.querySelector('#al-retry-btn');
+  if (retryBtn) retryBtn.addEventListener('click', fetchAllowlist);
+  const addBtn = body.querySelector('#al-add-btn');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    const emailInput = document.getElementById('al-new-email');
+    const roleSelect = document.getElementById('al-new-role');
+    const email = (emailInput?.value || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) { emailInput?.focus(); return; }
+    allowlistUpsert(email, roleSelect?.value || 'viewer', 'active').then(() => {
+      if (emailInput) emailInput.value = '';
+    });
+  });
+  const emailInput = body.querySelector('#al-new-email');
+  if (emailInput) emailInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') body.querySelector('#al-add-btn')?.click();
+  });
+}
+
 function renderAccessDenied() {
   const signedInAs = state.user?.email ? `Signed in as ${state.user.email}.` : 'You are signed in.';
   return `
@@ -610,7 +835,7 @@ function renderAccessDenied() {
       <div class="state-subtitle">${escapeHtml(state.accessDeniedMessage || 'Your account is not on the LoadFactor allowlist yet. Contact alex.zuttre@flyr.com to request access.')}</div>
       <div class="state-detail">${escapeHtml(signedInAs)} Ask alex.zuttre@flyr.com to add your email to the Firestore allowlist.</div>
       <div class="state-actions">
-        <button type="button" class="secondary-btn" id="logout-btn-inline">Sign out</button>
+        <button type="button" class="secondary-btn" id="logout-btn-inline">${authActionLabel()}</button>
       </div>
     </div>
   `;
@@ -657,6 +882,7 @@ function groupRows(rows) {
       const sources = [...new Set(children.map((row) => row.sellable_update_source).filter(Boolean))];
       const timestamps = children.map((row) => row.quota_last_updated_at).filter(Boolean);
       const latest = timestamps.length ? timestamps.sort().pop() : null;
+      const allCabinsFrozen = children.every((row) => row.is_frozen);
       result.push({
         ...first,
         physical_capacity: sumField('physical_capacity'),
@@ -669,10 +895,12 @@ function groupRows(rows) {
         cabin_name: null,
         sellable_update_source: sources.length === 1 ? sources[0] : sources.length > 1 ? 'Mixed' : null,
         quota_last_updated_at: latest,
+        is_frozen: allCabinsFrozen,
         _isGroup: true,
         _children: children,
         _groupKey: key,
         _cabinCount: children.length,
+        _allCabinsFrozen: allCabinsFrozen,
       });
     }
   }
@@ -770,16 +998,20 @@ function renderTable() {
     const isGroup = row._isGroup;
     const isChild = row._isChild;
     const expanded = isGroup && state.expandedGroups.has(row._groupKey);
-    const rowClass = isGroup ? 'group-parent' : isChild ? 'group-child' : '';
+    const showFrozenCue = row.is_frozen && (!isGroup || row._allCabinsFrozen);
+    const rowClass = [isGroup ? 'group-parent' : isChild ? 'group-child' : '', showFrozenCue ? 'frozen-row' : '']
+      .filter(Boolean)
+      .join(' ');
     const cabinCol = isGroup ? `<span class="cabin-count-badge">${row._cabinCount} cabins</span>` : cabinBadge(row.cabin_name, row.cabin_code);
     const chevron = isGroup
       ? `<button type="button" class="group-toggle ${expanded ? 'expanded' : ''}" data-group-key="${escapeAttr(row._groupKey)}">▶</button>`
       : isChild ? '<span class="child-indent"></span>' : '';
+    const frozenCue = showFrozenCue ? frozenBadge() : '';
 
     return `<tr class="${rowClass}"${isGroup ? ` data-group-key="${escapeAttr(row._groupKey)}"` : ''}>
       <td class="date-cell">${chevron}${row.departure_date || '—'}</td>
       <td><div class="route-cell">${row.origin} <span class="route-arrow">→</span> ${row.destination}</div></td>
-      <td><div class="flight-cell"><span class="flight-carrier">${row.operating_carrier_code}</span><span class="flight-number">${row.operating_flight_number}</span>${row.operational_suffix ? `<span class="flight-suffix">${row.operational_suffix}</span>` : ''}${trackerCopyButton(row.tracker_id)}</div></td>
+      <td><div class="flight-cell"><span class="flight-carrier">${row.operating_carrier_code}</span><span class="flight-number">${row.operating_flight_number}</span>${row.operational_suffix ? `<span class="flight-suffix">${row.operational_suffix}</span>` : ''}${trackerCopyButton(row.tracker_id)}${frozenCue}</div></td>
       <td class="aircraft-td" data-tracker-id="${escapeAttr(row.tracker_id || '')}">${aircraftTypeCell(row.aircraft_type, row.seat_map_name, row.seat_map_id)}</td>
       <td>${cabinCol}</td>
       <td class="col-num">${fmtN(row.physical_capacity)}</td><td class="col-num">${fmtN(row.lidded_capacity)}</td><td class="col-num">${fmtN(row.sellable_capacity)}</td>
@@ -806,6 +1038,10 @@ function renderTable() {
 function cabinBadge(name, code) {
   const style = code === 2 ? 'business' : code === 4 ? 'premium-economy' : code === 5 ? 'economy' : 'other';
   return `<span class="cabin-badge ${style}">${name}</span>`;
+}
+
+function frozenBadge() {
+  return `<span class="status-badge frozen" ${tooltipAttrs('Frozen flight')}>FROZEN</span>`;
 }
 
 function lfBar(percent) {
@@ -848,6 +1084,26 @@ function renderFooter() {
   return `<footer class="footer">Stock Keeper Spanner · ${project} · ${state.selectedEnv}${identity} · Read-only queries · Data is not stored</footer>`;
 }
 
+function goHome() {
+  const inputs = getSearchInputs();
+  activeSearchSeq += 1;
+  state = {
+    ...state,
+    loading: false,
+    error: null,
+    data: null,
+    sortKey: null,
+    sortDir: 'asc',
+    calendarOpen: false,
+    expandedGroups: new Set(),
+    dashboardPanels: {},
+    dashboardPeriod: 'last3',
+  };
+  render();
+  restoreSearchInputs(inputs);
+  loadDashboard(state.selectedEnv, 'last3');
+}
+
 function bindEvents() {
   const searchPanel = document.getElementById('search-panel');
   if (searchPanel) {
@@ -855,8 +1111,13 @@ function bindEvents() {
     searchPanel.addEventListener('mouseover', onPanelHover);
     searchPanel.addEventListener('mouseout', onPanelOut);
   }
+  const allowlistBtn = document.getElementById('allowlist-btn');
+  if (allowlistBtn) allowlistBtn.addEventListener('click', openAllowlist);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllowlist(); });
   const themeToggle = document.getElementById('theme-toggle');
   if (themeToggle) themeToggle.addEventListener('click', toggleTheme);
+  const homeButton = document.getElementById('home-btn');
+  if (homeButton) homeButton.addEventListener('click', goHome);
   const expandAllBtn = document.getElementById('expand-all-btn');
   if (expandAllBtn) expandAllBtn.addEventListener('click', expandAll);
   const collapseAllBtn = document.getElementById('collapse-all-btn');
@@ -866,10 +1127,15 @@ function bindEvents() {
     const inputs = getSearchInputs();
     const shouldRepeatSearch = Boolean(state.data || state.error || state.loading);
     state.selectedEnv = event.target.value;
+    state.dashboardPanels = {};
+    state.dashboardPeriod = 'last3';
+    if (shouldRepeatSearch) {
+      handleSearch(inputs);
+      return;
+    }
     render();
-    prewarmSeatMaps(state.selectedEnv);
-    if (shouldRepeatSearch) handleSearch(inputs);
-    else { restoreSearchInputs(inputs); state.dashboardPanels = {}; loadDashboard(state.selectedEnv); }
+    restoreSearchInputs(inputs);
+    loadDashboard(state.selectedEnv, 'last3');
   });
   const logoutButton = document.getElementById('logout-btn');
   if (logoutButton) logoutButton.addEventListener('click', handleLogout);
@@ -1038,6 +1304,11 @@ async function fetchAircraftAsync(searchSeq, searchEnv) {
 }
 
 async function handleLogout() {
+  if (isIapUser()) {
+    window.location.assign(`/auth/switch-account?returnTo=${encodeURIComponent(buildReturnTo())}`);
+    return;
+  }
+
   try {
     await fetch('/auth/logout', { method: 'POST' });
   } catch {
