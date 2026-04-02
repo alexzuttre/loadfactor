@@ -659,14 +659,14 @@ async function fetchAllowlist(silent = false) {
   updateAllowlistBody();
 }
 
-async function allowlistUpsert(email, role, status) {
+async function allowlistUpsert(email, role) {
   state.allowlistSaving = email;
   updateAllowlistBody();
   try {
     await fetchJsonOrThrow('/api/access-users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, role, status }),
+      body: JSON.stringify({ email, role, status: 'active' }),
     });
     await fetchAllowlist(true);
   } catch (err) {
@@ -706,7 +706,6 @@ function renderAllowlistBody() {
   const rows = users.map(u => {
     const isImmutable = u.email === IMMUTABLE_ADMIN;
     const isSaving = state.allowlistSaving === u.email;
-    const isActive = u.status === 'active';
     const disableAll = isSaving || isImmutable;
 
     return `<div class="al-row${isSaving ? ' al-row-saving' : ''}">
@@ -715,15 +714,8 @@ function renderAllowlistBody() {
         ${isImmutable ? '<span class="al-lock" title="Protected admin">🔒</span>' : ''}
       </div>
       <div class="al-controls">
-        <button type="button" class="al-chip${isActive ? ' active' : ''}"
-          data-al-action="toggle-status" data-email="${escapeAttr(u.email)}"
-          data-role="${escapeAttr(u.role)}" data-status="${isActive ? 'disabled' : 'active'}"
-          ${disableAll ? 'disabled' : ''}
-          title="${isActive ? 'Disable access' : 'Enable access'}">
-          ${isActive ? 'Active' : 'Disabled'}
-        </button>
         <select class="al-role-select al-role-select--inline"
-          data-al-action="set-role" data-email="${escapeAttr(u.email)}" data-status="${escapeAttr(u.status)}"
+          data-al-action="set-role" data-email="${escapeAttr(u.email)}"
           ${disableAll ? 'disabled' : ''}>
           <option value="viewer"${u.role === 'viewer' ? ' selected' : ''}>Viewer</option>
           <option value="admin"${u.role === 'admin' ? ' selected' : ''}>Admin</option>
@@ -803,11 +795,9 @@ function bindAllowlistBodyEvents(body) {
   body.querySelectorAll('[data-al-action]').forEach(el => {
     const eventType = el.tagName === 'SELECT' ? 'change' : 'click';
     el.addEventListener(eventType, () => {
-      const { alAction, email, status } = el.dataset;
+      const { alAction, email } = el.dataset;
       if (alAction === 'delete') { allowlistDelete(email); return; }
-      if (alAction === 'set-role') { allowlistUpsert(email, el.value, status); return; }
-      // toggle-status
-      allowlistUpsert(email, el.dataset.role, el.dataset.status);
+      if (alAction === 'set-role') { allowlistUpsert(email, el.value); return; }
     });
   });
   const retryBtn = body.querySelector('#al-retry-btn');
@@ -818,7 +808,7 @@ function bindAllowlistBodyEvents(body) {
     const roleSelect = document.getElementById('al-new-role');
     const email = (emailInput?.value || '').trim().toLowerCase();
     if (!email || !email.includes('@')) { emailInput?.focus(); return; }
-    allowlistUpsert(email, roleSelect?.value || 'viewer', 'active').then(() => {
+    allowlistUpsert(email, roleSelect?.value || 'viewer').then(() => {
       if (emailInput) emailInput.value = '';
     });
   });
