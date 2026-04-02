@@ -1364,7 +1364,7 @@ body {
 /* Alert Section */
 .alert-section {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
 }
 
@@ -1422,6 +1422,7 @@ body {
 .alert-item.high-lf .alert-val { color: var(--lf-amber); }
 .alert-item.low-lf .alert-val { color: var(--lf-red); }
 .alert-item.overbooking .alert-val { color: var(--destructive); }
+.alert-item.overbooking-lidded .alert-val { color: var(--destructive); font-weight: 700; }
 
 .alert-empty {
   font-size: 0.78rem;

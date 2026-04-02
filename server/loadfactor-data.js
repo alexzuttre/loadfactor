@@ -687,6 +687,7 @@ WHERE tr.quota_type = 'CAPACITY'
       const alertsHigh = [];
       const alertsLow = [];
       const alertsOverbooking = [];
+      const alertsOverbookingLidded = [];
       const flightSet = new Set();      // unique flight keys
 
       for (const r of rows) {
@@ -734,6 +735,11 @@ WHERE tr.quota_type = 'CAPACITY'
           const routeLabel = `${r.origin} → ${r.destination}`;
           alertsOverbooking.push({ flight: flightLabel, date, route: routeLabel, cabin: CABIN_LETTER[cc] || '?', soldHeld: sold + held, sellable });
         }
+        if (lidded > 0 && sold + held > lidded) {
+          const flightLabel = `RX ${r.operating_flight_number}${r.operational_suffix || ''}`;
+          const routeLabel = `${r.origin} → ${r.destination}`;
+          alertsOverbookingLidded.push({ flight: flightLabel, date, route: routeLabel, cabin: CABIN_LETTER[cc] || '?', soldHeld: sold + held, lidded });
+        }
       }
 
       // Build daily LF array (sorted by date)
@@ -775,10 +781,12 @@ WHERE tr.quota_type = 'CAPACITY'
       // Sort alerts by LF (most extreme first), cap at 5
       alertsHigh.sort((a, b) => b.lf - a.lf);
       alertsLow.sort((a, b) => a.lf - b.lf);
+      alertsOverbookingLidded.sort((a, b) => (b.soldHeld - b.lidded) - (a.soldHeld - a.lidded));
       const alerts = {
         highLF: alertsHigh.slice(0, 5),
         lowLF: alertsLow.slice(0, 5),
         overbooking: alertsOverbooking.slice(0, 5),
+        overbookingLidded: alertsOverbookingLidded.slice(0, 5),
       };
 
       const result = {

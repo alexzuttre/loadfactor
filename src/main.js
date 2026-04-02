@@ -469,6 +469,8 @@ function renderDashboard() {
     const rows = items.map(a => {
       const val = type === 'overbooking'
         ? `${a.soldHeld}/${a.sellable}`
+        : type === 'overbooking-lidded'
+        ? `${a.soldHeld}/${a.lidded}`
         : `${a.lf.toFixed(1)}%`;
       return `<div class="alert-item ${type}">
         <span class="alert-flight">${a.flight}</span>
@@ -517,7 +519,8 @@ function renderDashboard() {
       <div class="alert-section">
         ${renderAlertGroup('High LF (>95%)', d.alerts.highLF, 'high-lf', 'Individual cabin-flights where sold ÷ lidded capacity exceeds 95%, over the last 3 days')}
         ${renderAlertGroup('Low LF (<40%)', d.alerts.lowLF, 'low-lf', 'Individual cabin-flights where sold ÷ lidded capacity is below 40%, over the last 3 days')}
-        ${renderAlertGroup('Overbooking', d.alerts.overbooking, 'overbooking', 'Cabin-flights where sold + held exceeds sellable capacity, over the last 3 days')}
+        ${renderAlertGroup('Oversold (Sellable)', d.alerts.overbooking, 'overbooking', 'Cabin-flights where sold + held exceeds sellable capacity, over the last 3 days')}
+        ${renderAlertGroup('Oversold (Lidded)', d.alerts.overbookingLidded || [], 'overbooking-lidded', 'Cabin-flights where sold + held exceeds lidded (physical max) capacity, over the last 3 days')}
       </div>
     </div>
   `;
