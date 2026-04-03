@@ -1,6 +1,6 @@
 # LoadFactor IAP Operations Runbook
 
-Last updated: 2026-04-01
+Last updated: 2026-04-03
 
 ## Current Deployment
 - Project: `prj-lab-alex-zuttre-loadfactor`
@@ -27,15 +27,66 @@ Last updated: 2026-04-01
 ## Known Remaining Gap
 - The runtime service account
   - `loadfactor-runner@prj-lab-alex-zuttre-loadfactor.iam.gserviceaccount.com`
-  still lacks `roles/spanner.databaseReader` in:
-  - `prj-rx-int-ooms-a557`
-  - `prj-rx-stg-ooms-a729`
-  - `prj-rx-prd-ooms-6f6c`
-- Your user did not have `setIamPolicy` permission on those projects, so that part could not be completed from this thread.
+  still lacks the following grants (DevOps request pending):
+  - `roles/spanner.databaseReader` on `prj-rx-int-ooms-a557`
+  - `roles/spanner.databaseReader` on `prj-rx-stg-ooms-a729`
+  - `roles/spanner.databaseReader` on `prj-rx-prd-ooms-6f6c`
+  - `roles/cloudasset.viewer` at org `256890650197` (flyrlabs.com)
 - Result:
   - Auth gate works now.
   - `/api/me` and `/api/environments` can work.
-  - Spanner-backed data endpoints will fail until those grants are added.
+  - Spanner-backed data endpoints and per-user permission checks will fail until those grants are added.
+
+## IAM-Aware Environment Gating
+
+The Firestore allowlist is the outer gate (is this user allowed to use LoadFactor at all?). A second server-side gate then checks what each user can actually see in Spanner and limits their environment dropdown accordingly.
+
+### How permission checks work
+
+Per-user Spanner access is determined using the **Cloud Asset `AnalyzeIamPolicy` API**, scoped to the GCP organization (`organizations/256890650197`).
+
+For each environment, the server calls:
+```
+GET https://cloudasset.googleapis.com/v1/organizations/256890650197:analyzeIamPolicy
+  ?analysisQuery.identitySelector.identity=user:{email}
+  &analysisQuery.accessSelector.permissions=spanner.sessions.create
+  &analysisQuery.resourceSelector.fullResourceName=//spanner.googleapis.com/projects/{project}/instances/stockkeeper/databases/stockkeeper
+```
+
+Result interpretation:
+- `mainAnalysis.analysisResults` non-empty → **allowed**
+- empty + `fullyExplored: true` → **denied**
+- empty + `fullyExplored: false` → **unknown** (treated as deny)
+
+### Why Cloud Asset API (not Policy Troubleshooter)
+
+Policy Troubleshooter was tried first but abandoned:
+- **v3** (`policytroubleshooter.googleapis.com/v3`) returns 404 in this configuration.
+- **v1** returns `UNKNOWN_INFO_DENIED` for policies inherited through Google Groups or set at org/folder level, so it missed PRD access granted via `gcp-organization-viewer@flyrlabs.com`.
+
+Cloud Asset `AnalyzeIamPolicy` resolves group membership and org-level bindings, and returns `fullyExplored: true` when results are definitive. Org scope is required — project scope also missed the org-level PRD binding.
+
+### Required IAM for the runtime service account
+
+To run permission checks in production, `loadfactor-runner@prj-lab-alex-zuttre-loadfactor.iam.gserviceaccount.com` needs:
+
+| Role | Scope | Purpose |
+|------|-------|---------|
+| `roles/cloudasset.viewer` | Org `256890650197` | Call `AnalyzeIamPolicy` to check any user's access |
+| `roles/spanner.databaseReader` | `prj-rx-int-ooms-a557` | Query Spanner for INT/QA dashboards |
+| `roles/spanner.databaseReader` | `prj-rx-stg-ooms-a729` | Query Spanner for STG/NFT/Training dashboards |
+| `roles/spanner.databaseReader` | `prj-rx-prd-ooms-6f6c` | Query Spanner for PRD dashboard |
+
+If org-level `roles/cloudasset.viewer` is too broad, a custom role with only `cloudasset.assets.analyzeIamPolicy` suffices.
+
+In local development, the server uses Application Default Credentials (`gcloud auth application-default login`), so permission checks run as the developer's own account instead.
+
+### Config
+
+```bash
+PERMISSION_CACHE_TTL_MS=600000   # 10-minute cache per user
+GCP_ORGANIZATION_ID=256890650197
+```
 
 ## Required APIs
 Enable these in the LoadFactor project:
@@ -46,6 +97,7 @@ gcloud services enable \
   cloudbuild.googleapis.com \
   secretmanager.googleapis.com \
   firestore.googleapis.com \
+  cloudasset.googleapis.com \
   iap.googleapis.com \
   iamcredentials.googleapis.com \
   compute.googleapis.com \
@@ -87,6 +139,10 @@ gcloud projects add-iam-policy-binding prj-lab-alex-zuttre-loadfactor \
 gcloud projects add-iam-policy-binding prj-lab-alex-zuttre-loadfactor \
   --member='serviceAccount:loadfactor-runner@prj-lab-alex-zuttre-loadfactor.iam.gserviceaccount.com' \
   --role='roles/secretmanager.secretAccessor'
+
+gcloud projects add-iam-policy-binding prj-lab-alex-zuttre-loadfactor \
+  --member='serviceAccount:loadfactor-runner@prj-lab-alex-zuttre-loadfactor.iam.gserviceaccount.com' \
+  --role='roles/serviceusage.serviceUsageConsumer'
 ```
 
 Create the runtime session secret:
@@ -189,9 +245,10 @@ gcloud logging read \
   --format=json
 ```
 
-## Cross-Project Spanner Access Request
+## Cross-Project Access Request
 Ask a platform admin to grant:
 ```bash
+# Spanner read access for dashboard data queries
 gcloud projects add-iam-policy-binding prj-rx-int-ooms-a557 \
   --member='serviceAccount:loadfactor-runner@prj-lab-alex-zuttre-loadfactor.iam.gserviceaccount.com' \
   --role='roles/spanner.databaseReader' \
@@ -206,6 +263,11 @@ gcloud projects add-iam-policy-binding prj-rx-prd-ooms-6f6c \
   --member='serviceAccount:loadfactor-runner@prj-lab-alex-zuttre-loadfactor.iam.gserviceaccount.com' \
   --role='roles/spanner.databaseReader' \
   --condition=None
+
+# Cloud Asset API access for per-user permission checks (org-scoped)
+gcloud organizations add-iam-policy-binding 256890650197 \
+  --member='serviceAccount:loadfactor-runner@prj-lab-alex-zuttre-loadfactor.iam.gserviceaccount.com' \
+  --role='roles/cloudasset.viewer'
 ```
 
 ## Verification

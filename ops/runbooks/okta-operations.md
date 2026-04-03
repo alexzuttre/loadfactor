@@ -66,7 +66,7 @@ node scripts/seed_allowlist.js --file ops/allowlist.initial.json initial-load
 
 After you confirm the failure case for your own account, add yourself explicitly:
 ```bash
-node scripts/seed_allowlist.js alex.zuttre@flyr.com admin active initial-load
+node scripts/seed_allowlist.js alex.zuttre@flyr.com admin initial-load
 ```
 
 ## Acceptance Checklist
