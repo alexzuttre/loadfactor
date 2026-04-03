@@ -24,6 +24,7 @@ let state = {
   accessDeniedMessage: '',
   user: null,
   access: null,
+  permissions: null,
   loading: false,
   error: null,
   data: null,
@@ -46,6 +47,7 @@ let state = {
   allowlistUsers: null,
   allowlistError: null,
   allowlistSaving: null,       // email being saved/deleted
+  allowlistPerms: {},          // { [email]: { loading, data, error } }
 };
 let tooltipEl = null;
 let activeTooltipTarget = null;
@@ -134,9 +136,9 @@ async function boot() {
   try {
     const environments = await fetchJsonOrThrow('/api/environments');
     state.environments = environments;
-    if (!environments.some((env) => env.name === state.selectedEnv) && environments[0]) {
-      state.selectedEnv = environments[0].name;
-    }
+    state.selectedEnv = environments.some((env) => env.name === state.selectedEnv)
+      ? state.selectedEnv
+      : environments[0]?.name || '';
   } catch (error) {
     if (!isAuthRedirectError(error)) {
       state.authError = error.message;
@@ -144,7 +146,7 @@ async function boot() {
   }
 
   render();
-  if (state.authorized) {
+  if (state.authorized && state.selectedEnv) {
     state.dashboardPanels = {};
     state.dashboardPeriod = 'last3';
     loadDashboard(state.selectedEnv, 'last3');
@@ -207,18 +209,20 @@ async function fetchJsonOrThrow(url, options = {}) {
   }
 
   if (response.status === 403) {
-    state = {
-      ...state,
-      authLoading: false,
-      authenticated: true,
-      authorized: false,
-      user: payload?.user || state.user,
-      access: payload?.access || null,
-      accessDeniedMessage: payload?.error || 'You are signed in, but you are not on the LoadFactor allowlist.',
-      loading: false,
-    };
-    render();
-    throw new Error(state.accessDeniedMessage);
+    if (payload?.authorized === false) {
+      state = {
+        ...state,
+        authLoading: false,
+        authenticated: true,
+        authorized: false,
+        user: payload?.user || state.user,
+        access: payload?.access || null,
+        accessDeniedMessage: payload?.error || 'You are signed in, but you are not on the LoadFactor allowlist.',
+        loading: false,
+      };
+      render();
+    }
+    throw new Error(payload?.error || state.accessDeniedMessage || 'HTTP 403');
   }
 
   if (!response.ok) {
@@ -259,6 +263,7 @@ async function loadSessionState() {
       authorized: Boolean(payload?.authorized),
       user: payload?.user || null,
       access: payload?.access || null,
+      permissions: payload?.permissions || null,
       accessDeniedMessage: '',
       authError: null,
     };
@@ -286,16 +291,17 @@ function restoreSearchInputs({ origin = '', dest = '', flights = '' } = {}) {
 function render() {
   document.getElementById('app').innerHTML =
     renderHeader()
-    + (state.authorized ? renderSearchPanel() : '')
+    + (state.authorized && state.environments.length ? renderSearchPanel() : '')
     + renderContent()
     + renderFooter();
   bindEvents();
 }
 
 function renderHeader() {
-  const isProd = state.selectedEnv === 'rx-prd';
+  const selectedEnvConfig = state.environments.find((env) => env.name === state.selectedEnv);
+  const isProd = selectedEnvConfig?.isProd || false;
   const badgeClass = isProd ? 'env-badge env-prod' : 'env-badge env-nonprod';
-  const envList = state.environments.length ? state.environments : [{ name: 'rx-prd', isProd: true }];
+  const envList = state.environments;
   const options = envList.map((env) =>
     `<option value="${env.name}" ${env.name === state.selectedEnv ? 'selected' : ''}>${env.name}</option>`,
   ).join('');
@@ -350,7 +356,7 @@ function renderHeader() {
           </svg>
         </button>` : ''}
         <button type="button" class="theme-toggle" id="theme-toggle" title="Switch to ${state.theme === 'dark' ? 'light' : 'dark'} mode">${themeIcon}</button>
-        ${state.authorized ? `<div class="${badgeClass}"><select id="env-select" class="env-select">${options}</select></div>` : ''}
+        ${state.authorized && envList.length ? `<div class="${badgeClass}"><select id="env-select" class="env-select">${options}</select></div>` : ''}
         ${authControls}
       </div>
     </header>
@@ -449,11 +455,35 @@ function renderContent() {
   if (state.authLoading) return renderState('loading', '🔐', 'Checking access…', 'Validating your Okta session and LoadFactor allowlist entry.');
   if (state.authError) return renderState('error', '⚠️', 'Access Check Failed', state.authError);
   if (!state.authorized) return renderAccessDenied();
+  if (state.authorized && state.environments.length === 0) return renderNoEnvironmentAccess();
   if (state.loading) return renderState('loading', '✈️', 'Querying Stock Keeper…', `Fetching live load factor data from ${state.selectedEnv} Spanner`);
   if (state.error) return renderState('error', '⚠️', 'Query Failed', state.error);
   if (!state.data) return renderDashboard();
   if (state.data.results.length === 0) return renderState('empty', '📭', 'No Flights Found', `No CAPACITY trackers matched for ${state.data.origin} → ${state.data.destination}, ${state.data.dateFrom} to ${state.data.dateTo}.`);
   return renderSummary() + renderTable();
+}
+
+function renderNoEnvironmentAccess() {
+  const signedInAs = state.user?.email ? `Signed in as ${state.user.email}.` : 'You are signed in.';
+  return `
+    <div class="state-container auth-denied">
+      <div class="state-icon">🔒</div>
+      <div class="state-title">No Spanner Access</div>
+      <div class="state-subtitle">You are on the LoadFactor allowlist but don't have read access to any Spanner environment yet.</div>
+      <div class="state-detail">
+        ${escapeHtml(signedInAs)}<br><br>
+        To gain access, request <code>roles/spanner.databaseReader</code> on one or more of these projects:
+        <ul class="no-access-projects">
+          <li><code>prj-rx-int-ooms-a557</code> — INT / QA</li>
+          <li><code>prj-rx-stg-ooms-a729</code> — STG / NFT / Training</li>
+          <li><code>prj-rx-prd-ooms-6f6c</code> — PRD</li>
+        </ul>
+      </div>
+      <div class="state-actions">
+        <button type="button" class="secondary-btn" id="logout-btn-inline">${authActionLabel()}</button>
+      </div>
+    </div>
+  `;
 }
 
 function renderDashboard() {
@@ -634,6 +664,7 @@ async function openAllowlist() {
   state.allowlistUsers = null;
   state.allowlistError = null;
   state.allowlistSaving = null;
+  state.allowlistPerms = {};
   renderAllowlistModal();
   await fetchAllowlist();
 }
@@ -656,6 +687,20 @@ async function fetchAllowlist(silent = false) {
   }
   state.allowlistLoading = false;
   state.allowlistSaving = null;
+  updateAllowlistBody();
+}
+
+async function checkUserPermissions(email) {
+  state.allowlistPerms[email] = { loading: true, data: null, error: null };
+  updateAllowlistBody();
+  try {
+    const res = await fetchJsonOrThrow(`/api/access-users/${encodeURIComponent(email)}/permissions`);
+    state.allowlistPerms[email] = { loading: false, data: res.permissions, error: null };
+  } catch (err) {
+    if (!isAuthRedirectError(err)) {
+      state.allowlistPerms[email] = { loading: false, data: null, error: err.message };
+    }
+  }
   updateAllowlistBody();
 }
 
@@ -707,13 +752,32 @@ function renderAllowlistBody() {
     const isImmutable = u.email === IMMUTABLE_ADMIN;
     const isSaving = state.allowlistSaving === u.email;
     const disableAll = isSaving || isImmutable;
+    const permState = state.allowlistPerms[u.email];
+
+    let permSection = '';
+    if (permState?.loading) {
+      permSection = `<div class="perm-matrix-empty"><div class="spinner spinner--sm"></div> Checking…</div>`;
+    } else if (permState?.error) {
+      permSection = `<div class="perm-matrix-empty perm-matrix-error">${escapeHtml(permState.error)}</div>`;
+    } else if (permState?.data) {
+      permSection = renderPermissionMatrix(permState.data);
+    }
 
     return `<div class="al-row${isSaving ? ' al-row-saving' : ''}">
-      <div class="al-email">
-        ${escapeHtml(u.email)}
-        ${isImmutable ? '<span class="al-lock" title="Protected admin">🔒</span>' : ''}
+      <div class="al-main">
+        <div class="al-email">
+          ${escapeHtml(u.email)}
+          ${isImmutable ? '<span class="al-lock" title="Protected admin">🔒</span>' : ''}
+        </div>
+        ${permSection}
       </div>
       <div class="al-controls">
+        <button type="button" class="al-perm-btn"
+          data-al-action="check-perms" data-email="${escapeAttr(u.email)}"
+          ${permState?.loading ? 'disabled' : ''}
+          title="Check Spanner permissions">
+          ${permState?.loading ? '<div class="spinner spinner--sm"></div>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'}
+        </button>
         <select class="al-role-select al-role-select--inline"
           data-al-action="set-role" data-email="${escapeAttr(u.email)}"
           ${disableAll ? 'disabled' : ''}>
@@ -746,6 +810,31 @@ function renderAllowlistBody() {
         <button type="button" class="al-add-btn" id="al-add-btn">Add</button>
       </div>
     </div>`;
+}
+
+function renderPermissionMatrix(permissions) {
+  const projects = permissions?.projectAccess || [];
+  if (!projects.length) {
+    return '<div class="perm-matrix-empty">No access data.</div>';
+  }
+
+  const projectCards = projects.map((project) => {
+    const environmentBadges = project.environments.map((env) => `
+      <div class="perm-env-row">
+        <span class="perm-env-name">${escapeHtml(env.environment)}</span>
+        <span class="perm-status-pill ${escapeAttr(env.status)}">${escapeHtml(env.status)}</span>
+      </div>
+    `).join('');
+
+    return `
+      <div class="perm-project-card">
+        <div class="perm-project-name">${escapeHtml(project.project)}</div>
+        <div class="perm-env-list">${environmentBadges}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `<div class="perm-matrix">${projectCards}</div>`;
 }
 
 function renderAllowlistModal() {
@@ -798,6 +887,7 @@ function bindAllowlistBodyEvents(body) {
       const { alAction, email } = el.dataset;
       if (alAction === 'delete') { allowlistDelete(email); return; }
       if (alAction === 'set-role') { allowlistUpsert(email, el.value); return; }
+      if (alAction === 'check-perms') { checkUserPermissions(email); return; }
     });
   });
   const retryBtn = body.querySelector('#al-retry-btn');
@@ -1071,9 +1161,10 @@ function seatMapTooltip(seatMapName, seatMapId) {
 
 function renderFooter() {
   const env = state.environments.find((entry) => entry.name === state.selectedEnv);
-  const project = env ? env.project : 'prj-rx-prd-ooms-6f6c';
+  const project = env ? env.project : 'No authorized environment';
   const identity = state.user?.email ? ` · ${state.user.email}` : '';
-  return `<footer class="footer">Stock Keeper Spanner · ${project} · ${state.selectedEnv}${identity} · Read-only queries · Data is not stored</footer>`;
+  const envLabel = state.selectedEnv || 'No environment';
+  return `<footer class="footer">Stock Keeper Spanner · ${project} · ${envLabel}${identity} · Read-only queries · Data is not stored</footer>`;
 }
 
 function goHome() {
@@ -1127,7 +1218,7 @@ function bindEvents() {
     }
     render();
     restoreSearchInputs(inputs);
-    loadDashboard(state.selectedEnv, 'last3');
+    if (state.selectedEnv) loadDashboard(state.selectedEnv, 'last3');
   });
   const logoutButton = document.getElementById('logout-btn');
   if (logoutButton) logoutButton.addEventListener('click', handleLogout);
@@ -1232,7 +1323,7 @@ function handleCabinClick(cabin) {
 }
 
 async function handleSearch(searchInputs = null) {
-  if (!state.authorized || !state.dateFrom || !state.dateTo) return;
+  if (!state.authorized || !state.selectedEnv || !state.dateFrom || !state.dateTo) return;
   const { origin, dest, flights } = searchInputs ?? getSearchInputs();
   const searchSeq = ++activeSearchSeq;
   state = { ...state, loading: true, error: null, data: null, sortKey: null, sortDir: 'asc', calendarOpen: false, expandedGroups: new Set() };

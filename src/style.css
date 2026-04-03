@@ -895,7 +895,7 @@ body {
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 1.5);
   width: 100%;
-  max-width: 560px;
+  max-width: 920px;
   max-height: calc(100vh - 90px);
   display: flex;
   flex-direction: column;
@@ -960,7 +960,7 @@ body {
 
 .al-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   padding: 8px 20px;
@@ -985,6 +985,50 @@ body {
   gap: 6px;
 }
 .al-lock { font-size: 0.75rem; flex-shrink: 0; }
+
+.al-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.al-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.al-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.al-status-badge.allowed {
+  color: var(--lf-green);
+  background: var(--lf-green-bg);
+}
+
+.al-status-badge.denied {
+  color: var(--lf-red);
+  background: var(--lf-red-bg);
+}
+
+.al-updated-by {
+  color: var(--muted-foreground);
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+}
 
 .al-controls {
   display: flex;
@@ -1085,6 +1129,113 @@ body {
 }
 .al-add-btn:hover { opacity: 0.88; }
 
+.perm-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.perm-project-card {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.1);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--card) 88%, var(--accent) 12%);
+}
+
+.perm-project-name {
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--foreground);
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+}
+
+.perm-env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.perm-env-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.perm-env-name {
+  color: var(--foreground);
+  font-size: 0.77rem;
+  font-weight: 600;
+}
+
+.perm-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.perm-status-pill.allowed {
+  color: var(--lf-green);
+  background: var(--lf-green-bg);
+}
+
+.perm-status-pill.denied {
+  color: var(--lf-red);
+  background: var(--lf-red-bg);
+}
+
+.perm-status-pill.unknown {
+  color: var(--lf-amber);
+  background: var(--lf-amber-bg);
+}
+
+.perm-matrix-empty {
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.perm-matrix-error { color: var(--destructive); }
+
+.al-perm-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.al-perm-btn svg { width: 13px; height: 13px; }
+.al-perm-btn:hover:not(:disabled) { background: var(--accent); color: var(--primary); border-color: var(--border); }
+.al-perm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.no-access-projects {
+  margin: 10px 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.83rem;
+}
+.no-access-projects li { color: var(--muted-foreground); }
+.no-access-projects code { color: var(--foreground); font-family: var(--font-mono); }
+
 
 .app-tooltip {
   position: fixed;
@@ -1169,6 +1320,17 @@ body {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+.spinner--sm { width: 12px; height: 12px; border-width: 1.5px; }
 
 /* ── Summary Bar ────────────────────────────────────────────────────────── */
 /* ── Table Toolbar ──────────────────────────────────────────────────────── */
