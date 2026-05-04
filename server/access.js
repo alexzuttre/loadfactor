@@ -2,9 +2,14 @@ import { Firestore, FieldValue } from '@google-cloud/firestore';
 
 const USER_ACCESS_COLLECTION = 'user_access';
 const firestoreCache = new Map();
+const IMMUTABLE_ADMIN_EMAILS = new Set(['alex.zuttre@flyr.com']);
 
 export function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
+}
+
+export function isImmutableAdminEmail(email) {
+  return IMMUTABLE_ADMIN_EMAILS.has(normalizeEmail(email));
 }
 
 function getFirestore(config) {
@@ -21,8 +26,21 @@ function getCollection(config) {
   return getFirestore(config).collection(USER_ACCESS_COLLECTION);
 }
 
+function serializeTimestamp(value) {
+  if (!value) return null;
+  if (typeof value?.toDate === 'function') {
+    return value.toDate().toISOString();
+  }
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 export function isAccessAuthorized(access) {
   return Boolean(access && access.status === 'active');
+}
+
+export function isAccessAdmin(access) {
+  return Boolean(isAccessAuthorized(access) && access.role === 'admin');
 }
 
 export function buildAccessDeniedMessage(access, email) {
@@ -44,8 +62,8 @@ export async function getAccessRecord(config, email) {
     email: normalizedEmail,
     role: data.role || 'viewer',
     status: data.status || 'active',
-    createdAt: data.createdAt ?? null,
-    updatedAt: data.updatedAt ?? null,
+    createdAt: serializeTimestamp(data.createdAt),
+    updatedAt: serializeTimestamp(data.updatedAt),
     updatedBy: data.updatedBy ?? null,
   };
 }
@@ -100,4 +118,33 @@ export async function upsertAccessRecord(config, { email, role = 'viewer', statu
   });
 
   return getAccessRecord(config, normalizedEmail);
+}
+
+export async function listAccessRecords(config) {
+  const snapshot = await getCollection(config).orderBy('email').get();
+  return snapshot.docs.map((doc) => {
+    const data = doc.data() || {};
+    return {
+      email: normalizeEmail(data.email || doc.id),
+      role: data.role || 'viewer',
+      status: data.status || 'active',
+      createdAt: serializeTimestamp(data.createdAt),
+      updatedAt: serializeTimestamp(data.updatedAt),
+      updatedBy: data.updatedBy ?? null,
+    };
+  });
+}
+
+export async function deleteAccessRecord(config, email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) throw new Error('Email is required.');
+
+  const docRef = getCollection(config).doc(normalizedEmail);
+  const snapshot = await docRef.get();
+  if (!snapshot.exists) {
+    return { deleted: false, email: normalizedEmail };
+  }
+
+  await docRef.delete();
+  return { deleted: true, email: normalizedEmail };
 }

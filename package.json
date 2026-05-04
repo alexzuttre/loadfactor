@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev": "concurrently -k --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:server": "node server/server.js",
     "build": "vite build",
@@ -22,6 +22,7 @@
     "@google-cloud/spanner": "^8.6.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "google-auth-library": "^10.6.2",
     "jose": "^6.2.2"
   }
 }

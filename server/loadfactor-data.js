@@ -1,4 +1,4 @@
-import { Spanner } from '@google-cloud/spanner';
+import { Spanner } from '../node_modules/@google-cloud/spanner/build/src/index.js';
 import { auditError, auditEvent } from './logging.js';
 
 export const ENVIRONMENTS = {
@@ -18,6 +18,47 @@ const seatMapCacheRefreshes = new Map();
 const AIRCRAFT_CACHE_TTL_MS = 10 * 60 * 1000;
 const SEAT_MAP_CACHE_TTL_MS = 60 * 60 * 1000;
 
+function getProductCatalogInstanceName(envName, env) {
+  return `productcatalog-${env.region}-${envName.replace('rx-', '')}`;
+}
+
+function buildSpannerDatabaseResource(project, instance, database) {
+  return `//spanner.googleapis.com/projects/${project}/instances/${instance}/databases/${database}`;
+}
+
+export function buildEnvironmentPermissionTargets(envName) {
+  const env = ENVIRONMENTS[envName];
+  if (!env) throw new Error(`Unknown environment: ${envName}`);
+
+  return [
+    {
+      key: 'stockkeeper',
+      label: 'Stock Keeper',
+      fullResourceName: buildSpannerDatabaseResource(env.project, env.skInstance, 'stockkeeper'),
+    },
+    {
+      key: 'productcatalog-search',
+      label: 'Product Catalog',
+      fullResourceName: buildSpannerDatabaseResource(
+        env.project,
+        getProductCatalogInstanceName(envName, env),
+        'productcatalog-search',
+      ),
+    },
+  ];
+}
+
+let runtimeConfig = {
+  spannerBuiltInMetricsEnabled: false,
+};
+
+export function setLoadFactorRuntimeConfig(config = {}) {
+  runtimeConfig = {
+    ...runtimeConfig,
+    ...config,
+  };
+}
+
 const TRACKER_SERVICE_SQL = `
 SELECT
   ts.tracker_id,
@@ -32,6 +73,19 @@ WHERE ts.tracker_id IN UNNEST(@trackerIds)
   AND se.deleted_at IS NULL
   AND COALESCE(seg.frozen, FALSE) = FALSE
 GROUP BY ts.tracker_id
+`;
+
+const FROZEN_TRACKERS_SQL = `
+SELECT DISTINCT
+  ts.tracker_id
+FROM trackers_services ts
+JOIN services se
+  ON ts.service_instance_id = se.id
+LEFT JOIN segments seg
+  ON se.segment_id = seg.segment_id
+WHERE ts.deleted_at IS NULL
+  AND se.deleted_at IS NULL
+  AND COALESCE(seg.frozen, FALSE) = TRUE
 `;
 
 const AIRCRAFT_TYPE_SQL = `
@@ -108,10 +162,26 @@ function getSpannerClients(envName) {
   const spanner = new Spanner({
     projectId: env.project,
     clientConfig: { quota_project_id: env.project },
+    disableBuiltInMetrics: !runtimeConfig.spannerBuiltInMetricsEnabled,
   });
   const skDatabase = spanner.instance(env.skInstance).database('stockkeeper');
-  const pcInstanceName = `productcatalog-${env.region}-${envName.replace('rx-', '')}`;
+  const pcInstanceName = getProductCatalogInstanceName(envName, env);
   const pcDatabase = spanner.instance(pcInstanceName).database('productcatalog-search');
+
+  // The Spanner client can emit background error events from the session pool.
+  // Handle them explicitly so local API/config issues do not crash the process.
+  skDatabase.on('error', (error) => {
+    auditError('spanner_database_error', error, {
+      env: envName,
+      database: 'stockkeeper',
+    });
+  });
+  pcDatabase.on('error', (error) => {
+    auditError('spanner_database_error', error, {
+      env: envName,
+      database: 'productcatalog-search',
+    });
+  });
 
   const clients = { skDatabase, pcDatabase, project: env.project };
   spannerClientCache.set(envName, clients);
@@ -149,6 +219,9 @@ function buildLoadFactorStatement({ dateFrom, dateTo, origin, destination, cabin
     : '';
 
   const sql = `
+WITH frozen_trackers AS (
+  ${FROZEN_TRACKERS_SQL}
+)
 SELECT
   tr.id AS tracker_id,
   tr.departure_date,
@@ -170,6 +243,7 @@ SELECT
   tr.sold,
   tr.held,
   tr.available,
+  ft.tracker_id IS NOT NULL AS is_frozen,
   CASE
     WHEN tr.sellable_capacity = 0
       AND CAST(JSON_VALUE(tr.adjustments_meta, '$.sellableCapacityAdjustmentTimestamp') AS TIMESTAMP) IS NOT NULL
@@ -200,6 +274,8 @@ SELECT
   END AS sellable_update_source,
   tr.updated_at AS quota_last_updated_at
 FROM trackers tr
+LEFT JOIN frozen_trackers ft
+  ON ft.tracker_id = tr.id
 WHERE tr.quota_type = 'CAPACITY'
   AND tr.operating_carrier_code = @carrier
   AND tr.deleted_at IS NULL
@@ -395,8 +471,19 @@ async function fetchAircraftDetails(serviceInstanceIds, pcDatabase, env) {
   }));
 }
 
-export function registerLoadFactorRoutes(router) {
-  router.get('/api/loadfactor', async (req, res) => {
+export function registerLoadFactorRoutes(router, options = {}) {
+  const {
+    requireEnvironmentAccess = (_req, _res, next) => next(),
+    listAuthorizedEnvironments = () => Object.entries(ENVIRONMENTS).map(([name, cfg]) => ({
+      name,
+      project: cfg.project,
+      isProd: name === 'rx-prd',
+      status: 'allowed',
+      reason: 'not_filtered',
+    })),
+  } = options;
+
+  router.get('/api/loadfactor', requireEnvironmentAccess((req) => req.query.env || 'rx-prd'), async (req, res) => {
     const { dateFrom, dateTo, origin = '', destination = '', cabins = '', flights = '', env = 'rx-prd' } = req.query;
 
     if (!ENVIRONMENTS[env]) {
@@ -482,6 +569,7 @@ export function registerLoadFactorRoutes(router) {
           sold: intVal(record.sold),
           held: intVal(record.held),
           available: intVal(record.available),
+          is_frozen: Boolean(record.is_frozen),
           sellable_update_source: record.sellable_update_source ?? null,
           sellable_last_updated_at: tsVal(record.sellable_last_updated_at),
           quota_last_updated_at: tsVal(record.quota_last_updated_at),
@@ -515,7 +603,7 @@ export function registerLoadFactorRoutes(router) {
     }
   });
 
-  router.post('/api/aircraft', async (req, res) => {
+  router.post('/api/aircraft', requireEnvironmentAccess((req) => req.body?.env || 'rx-prd'), async (req, res) => {
     const { trackerIds = [], serviceInstanceIds = [], env = 'rx-prd' } = req.body;
 
     if (!ENVIRONMENTS[env]) {
@@ -598,7 +686,7 @@ export function registerLoadFactorRoutes(router) {
     }
   });
 
-  router.post('/api/seatmaps/prewarm', async (req, res) => {
+  router.post('/api/seatmaps/prewarm', requireEnvironmentAccess((req) => req.body?.env || 'rx-prd'), async (req, res) => {
     const { env = 'rx-prd' } = req.body;
 
     if (!ENVIRONMENTS[env]) {
@@ -627,7 +715,7 @@ export function registerLoadFactorRoutes(router) {
   const DASHBOARD_CACHE_TTL_MS = 60_000;
   const CABIN_LETTER = { 2: 'J', 4: 'W', 5: 'Y' };
 
-  router.get('/api/dashboard', async (req, res) => {
+  router.get('/api/dashboard', requireEnvironmentAccess((req) => req.query.env || 'rx-prd'), async (req, res) => {
     const env = req.query.env || 'rx-prd';
     const period = req.query.period || 'last3';
     if (!ENVIRONMENTS[env]) {
@@ -659,6 +747,9 @@ export function registerLoadFactorRoutes(router) {
     }
 
     const sql = `
+WITH frozen_trackers AS (
+  ${FROZEN_TRACKERS_SQL}
+)
 SELECT
   tr.departure_date,
   tr.cabin_code,
@@ -671,9 +762,12 @@ SELECT
   tr.lidded_capacity,
   tr.sellable_capacity
 FROM trackers tr
+LEFT JOIN frozen_trackers ft
+  ON ft.tracker_id = tr.id
 WHERE tr.quota_type = 'CAPACITY'
   AND tr.operating_carrier_code = @carrier
   AND tr.deleted_at IS NULL
+  AND ft.tracker_id IS NULL
   AND tr.departure_date BETWEEN @dateFrom AND @dateTo
   AND tr.cabin_code IN UNNEST(@cabinCodes)
 `;
@@ -825,12 +919,12 @@ WHERE tr.quota_type = 'CAPACITY'
     }
   });
 
-  router.get('/api/environments', (_req, res) => {
-    const environments = Object.entries(ENVIRONMENTS).map(([name, cfg]) => ({
-      name,
-      project: cfg.project,
-      isProd: name === 'rx-prd',
-    }));
-    res.json(environments);
+  router.get('/api/environments', async (req, res, next) => {
+    try {
+      const environments = await listAuthorizedEnvironments(req);
+      res.json(environments);
+    } catch (error) {
+      next(error);
+    }
   });
 }
